@@ -1,5 +1,5 @@
-function MainFig = mouse_figure(MainFig)
-%MOUSE_FIGURE           mouse-friendly figure
+function hFig = mouse_figure(hFig)
+% MOUSE_FIGURE       mouse-friendly figure
 %
 % MOUSE_FIGURE() creates a figure (or modifies an existing one) that allows
 % zooming with the scroll wheel and panning with mouse clicks, *without*
@@ -39,31 +39,34 @@ function MainFig = mouse_figure(MainFig)
 
 
 % If you find this work useful, please consider a donation:
-% https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=6G3S5UYM7HJ3N
+% https://www.paypal.me/RodyO
 
     
     % initialize
-    status = '';  previous_point = [];
+    status         = '';  
+    previous_point = [];
     
     % initialize axes
-    if (nargin == 0) || ~ishandle(MainFig)
-        MainFig = figure;  axs = gca;
+    if (nargin == 0) || ~ishandle(hFig)
+        hFig  = figure;  
+        hAxes = gca;
     else
-        axs = get(MainFig, 'currentaxes');
+        hAxes = get(hFig, 'CurrentAxes');
     end
     
     % only works properly for 2D plots
-    if ~is2D(axs) % is2D might disappear in a future release...
+    [~,elevation] = view(hAxes);
+    if abs(elevation) ~= 90
         error('mouse_figure:plot3D_not_supported', ...
               'MOUSE_FIGURE() only works for 2-D plots.');
     end
         
     % get original limits
-    original_xlim = get(axs, 'xlim');
-    original_ylim = get(axs, 'ylim');
+    original_xlim = get(hAxes, 'xlim');
+    original_ylim = get(hAxes, 'ylim');
     
     % define zooming with scrollwheel, and panning with mouseclicks
-    set(MainFig, ...
+    set(hFig, ...
         'WindowScrollWheelFcn' , @scroll_zoom,...
         'WindowButtonDownFcn'  , @pan_click,...
         'WindowButtonUpFcn'    , @pan_release,...
@@ -71,98 +74,144 @@ function MainFig = mouse_figure(MainFig)
     
     % zoom in to the current point with the mouse wheel
     function scroll_zoom(varargin)
-        % double check if these axes are indeed the current axes
-        if get(MainFig, 'currentaxes') ~= axs, return, end
-        % get the amount of scolls
-        scrolls = varargin{2}.VerticalScrollCount;
-        % get the axes' x- and y-limits
-        xlim = get(axs, 'xlim');  ylim = get(axs, 'ylim');
+        
+        % Double check if these axes are indeed the current axes
+        if get(hFig, 'currentaxes') ~= hAxes
+            return, end
+        
+        % Calculate zoom factor        
+        zoomfactor = min(max(1 - varargin{2}.VerticalScrollCount/15, 0.3), 1.7);
+        
+        % get the axes limits
+        xlim = get(hAxes, 'xlim');
+        ylim = get(hAxes, 'ylim');
+        
         % get the current camera position, and save the [z]-value
-        cam_pos_Z = get(axs, 'cameraposition');  cam_pos_Z = cam_pos_Z(3);
+        cam_pos_Z = get(hAxes, 'CameraPosition'); 
+        cam_pos_Z = cam_pos_Z(3);
+        
         % get the current point
-        old_position = get(axs, 'CurrentPoint'); old_position(1,3) = cam_pos_Z;
-        % calculate zoom factor
-        zoomfactor = 1 - scrolls/50;
-        % adjust camera position
-        set(axs, 'cameratarget', [old_position(1, 1:2), 0],...
-            'cameraposition', old_position(1, 1:3));
-        % adjust the camera view angle (equal to zooming in)
+        old_position = get(hAxes, 'CurrentPoint'); 
+        old_position(1,3) = cam_pos_Z;
+        
+        % Messing with the camera settings might mess up the view (relevant 
+        % for displayed images that use "axis xy")
+        [az,el] = view(hAxes);
+        
+        % Adjust camera position and view angle
+        set(hAxes,...
+            'CameraTarget'  , [old_position(1, 1:2), 0],...
+            'CameraPosition', old_position(1, 1:3));
+        
         camzoom(zoomfactor);
+        
+        % Restore view
+        %[~,el] = view(hAxes);
+        view(hAxes, az,el);
+        
         % zooming with the camera has the side-effect of
         % NOT adjusting the axes limits. We have to correct for this:
         x_lim1 = (old_position(1,1) - min(xlim))/zoomfactor;
         x_lim2 = (max(xlim) - old_position(1,1))/zoomfactor;
         xlim   = [old_position(1,1) - x_lim1, old_position(1,1) + x_lim2];
+        set(hAxes, 'xlim', xlim);
+        
         y_lim1 = (old_position(1,2) - min(ylim))/zoomfactor;
         y_lim2 = (max(ylim) - old_position(1,2))/zoomfactor;
         ylim   = [old_position(1,2) - y_lim1, old_position(1,2) + y_lim2];
-        set(axs, 'xlim', xlim), set(axs, 'ylim', ylim)
+        set(hAxes, 'ylim', ylim);
+        
         % set new camera position
-        new_position = get(axs, 'CurrentPoint');
-        old_camera_target =  get(axs, 'CameraTarget');
+        new_position         = get(hAxes, 'CurrentPoint');
+        old_camera_target    = get(hAxes, 'CameraTarget');
         old_camera_target(3) = cam_pos_Z;
-        new_camera_position = old_camera_target - ...
-            (new_position(1,1:3) - old_camera_target(1,1:3));
-        % adjust camera target and position
-        set(axs, 'cameraposition', new_camera_position(1, 1:3),...
-            'cameratarget', [new_camera_position(1, 1:2), 0]);
-        % we also have to re-set the axes to stretch-to-fill mode
-        set(axs, 'cameraviewanglemode', 'auto',...
-            'camerapositionmode', 'auto',...
-            'cameratargetmode', 'auto');
-    end % scroll_zoom
+        new_camera_position  = old_camera_target - ...
+                               (new_position(1,1:3) - old_camera_target(1,1:3));
+        
+        % Adjust camera target and position
+        set(hAxes,...
+            'CameraPosition', new_camera_position(1, 1:3),...
+            'CameraTarget', [new_camera_position(1, 1:2), 0]);
+        
+        % We also have to re-set the axes to stretch-to-fill mode
+        set(hAxes, ...
+            'CameraViewAngleMode', 'auto',...
+            'CameraPositionMode', 'auto',...
+            'CameraTargetMode', 'auto');
+        
+    end % function scroll_zoom
     
-    % pan upon mouse click
+    % Pan upon mouse click
     function pan_click(varargin)
+        
         % double check if these axes are indeed the current axes
-        if get(MainFig, 'currentaxes') ~= axs, return, end
+        if get(hFig, 'currentaxes') ~= hAxes
+            return, end
+        
         % perform appropriate action
-        switch lower(get(MainFig, 'selectiontype'))            
+        switch lower(get(hFig, 'selectiontype'))  
+            
             % start panning on left click
             case 'normal' 
-                status = 'down';
-                previous_point = get(axs, 'CurrentPoint');              
-            % reset view on double click
+                status         = 'down';
+                previous_point = get(hAxes, 'CurrentPoint');              
+                
+            % Reset view on double click
             case 'open' % double click (left or right)
-                set(axs, 'Xlim', original_xlim,...
-                         'Ylim', original_ylim);  
-            % right click - set new reset state
+                set(hAxes,...
+                    'Xlim', original_xlim,...
+                    'Ylim', original_ylim);  
+                
+            % Right click - set new reset state
             case 'alt'
-                original_xlim = get(axs, 'xlim');
-                original_ylim = get(axs, 'ylim');
+                original_xlim = get(hAxes, 'xlim');
+                original_ylim = get(hAxes, 'ylim');
+                
         end
-    end
+        
+    end % function pan_click
     
     % release mouse button
     function pan_release(varargin)
+        
         % double check if these axes are indeed the current axes
-        if get(MainFig, 'currentaxes') ~= axs, return, end
-        % just reset status
-        status = '';
-    end
+        if get(hFig, 'currentaxes') ~= hAxes
+            return, end
+        
+        % just reset status        
+        status = ''; 
+        
+    end % function pan_release
     
     % move the mouse (with button clicked)
     function pan_motion(varargin)
+        
         % double check if these axes are indeed the current axes
-        if get(MainFig, 'currentaxes') ~= axs, return, end
+        if get(hFig, 'currentaxes') ~= hAxes
+            return, end
+        
         % return if there isn't a previous point
-        if isempty(previous_point), return, end  
+        if isempty(previous_point)
+            return, end  
         % return if mouse hasn't been clicked
-        if isempty(status), return, end  
+        if isempty(status)
+            return, end  
+        
         % get current location (in pixels)
-        current_point = get(axs, 'CurrentPoint');
+        current_point = get(hAxes, 'CurrentPoint');
         % get current XY-limits
-        xlim = get(axs, 'xlim');  ylim = get(axs, 'ylim');     
+        xlim = get(hAxes, 'xlim');  ylim = get(hAxes, 'ylim');     
         % find change in position
         delta_points = current_point - previous_point;  
-        % adjust limits
-        new_xlim = xlim - delta_points(1); 
-        new_ylim = ylim - delta_points(3); 
-        % set new limits
-        set(axs, 'Xlim', new_xlim); set(axs, 'Ylim', new_ylim);           
+        
+        % Adjust limits
+        set(hAxes, 'Xlim', xlim - delta_points(1)); 
+        set(hAxes, 'Ylim', ylim - delta_points(3));
+        
         % save new position
-        previous_point = get(axs, 'CurrentPoint');
-    end 
+        previous_point = get(hAxes, 'CurrentPoint');
+        
+    end % function pan_motion
     
 end
 
