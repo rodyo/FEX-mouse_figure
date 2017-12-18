@@ -45,6 +45,8 @@ function hFig = mouse_figure(hFig)
     % initialize
     status         = '';  
     previous_point = [];
+    zoom_timer     = [];
+    zoom_start     = 0;
     
     % initialize axes
     if (nargin == 0) || ~ishandle(hFig)
@@ -56,10 +58,9 @@ function hFig = mouse_figure(hFig)
     
     % only works properly for 2D plots
     [~,elevation] = view(hAxes);
-    if abs(elevation) ~= 90
-        error('mouse_figure:plot3D_not_supported', ...
-              'MOUSE_FIGURE() only works for 2-D plots.');
-    end
+    assert(abs(elevation) == 90,...
+          [mfilename ':plot3D_not_supported'], ...
+          [mfilename '() only works for 2-D plots.']);
         
     % get original limits
     original_xlim = get(hAxes, 'xlim');
@@ -79,8 +80,17 @@ function hFig = mouse_figure(hFig)
         if get(hFig, 'currentaxes') ~= hAxes
             return, end
         
+        zoom_start = tic();
+        
         % Calculate zoom factor        
         zoomfactor = min(max(1 - varargin{2}.VerticalScrollCount/15, 0.3), 1.7);
+        
+        % Adjust cursor
+        if zoomfactor > 1
+            setptr(hFig, 'glassplus');
+        elseif zoomfactor < 1
+            setptr(hFig, 'glassminus');
+        end
         
         % get the axes limits
         xlim = get(hAxes, 'xlim');
@@ -138,6 +148,27 @@ function hFig = mouse_figure(hFig)
             'CameraViewAngleMode', 'auto',...
             'CameraPositionMode', 'auto',...
             'CameraTargetMode', 'auto');
+                
+        % When done zooming: reset mouse cursor 
+        if isempty(zoom_timer)
+            zoom_timer = timer('TimerFcn', @reset_cursor,...
+                               'StopFcn' , @remove_timer);
+            start(zoom_timer);
+        end
+        
+        function reset_cursor(~,~)
+            while true
+                if toc(zoom_start) > 0.2
+                    set(hFig, 'Pointer', 'arrow');                    
+                    break;
+                end
+                pause(0.05);
+            end            
+        end        
+        function remove_timer(~,~)
+            delete(zoom_timer);
+            zoom_timer = [];
+        end
         
     end % function scroll_zoom
     
@@ -154,7 +185,8 @@ function hFig = mouse_figure(hFig)
             % start panning on left click
             case 'normal' 
                 status         = 'down';
-                previous_point = get(hAxes, 'CurrentPoint');              
+                previous_point = get(hAxes, 'CurrentPoint');  
+                setptr(hFig, 'closedhand'); 
                 
             % Reset view on double click
             case 'open' % double click (left or right)
@@ -178,8 +210,9 @@ function hFig = mouse_figure(hFig)
         if get(hFig, 'currentaxes') ~= hAxes
             return, end
         
-        % just reset status        
+        % just reset status and cursor      
         status = ''; 
+        setptr(hFig, 'arrow'); 
         
     end % function pan_release
     
